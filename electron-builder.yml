@@ -1,0 +1,47 @@
+appId: com.dsh.desktop
+productName: DSH 桌面端
+copyright: DSH Desktop
+
+directories:
+  output: release
+  buildResources: build
+
+# 使用 scripts/fetch-electron.js 解压好的运行时，构建过程不再联网下载 Electron。
+electronDist: build/electron-dist
+
+# 本应用没有任何原生依赖，跳过 @electron/rebuild：
+# 那一步会 fork 子进程做无意义的原生模块重建，纯属浪费且容易被环境策略拦掉。
+npmRebuild: false
+nodeGypRebuild: false
+
+files:
+  - src/**/*
+  - assets/**/*
+  - package.json
+
+extraMetadata:
+  main: src/main.js
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  artifactName: DSH-Desktop-Setup-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: DSH 桌面端
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  deleteAppDataOnUninstall: false
+  # 旧版本先卸载再装新版本，保证升级路径干净。
+  differentialPackage: false
+
+publish: null

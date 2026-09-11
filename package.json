@@ -1,0 +1,19 @@
+{
+  "name": "dsh-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH Desktop \u2014 Windows installer that deploys and runs DeepSeek Harness on a clean machine",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "icon": "node scripts/make-icon.js",
+    "electron": "node scripts/fetch-electron.js",
+    "check": "node scripts/check-logic.js",
+    "self-test": "node scripts/self-test.js",
+    "dist": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3"
+  }
+}

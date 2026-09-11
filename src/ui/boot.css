@@ -1,0 +1,209 @@
+:root {
+  --blue: #2f6bd8;
+  --blue-deep: #1b3a6b;
+  --blue-soft: #e8f1ff;
+  --ink: #1f2d3d;
+  --muted: #5b6b80;
+  --line: #d5e2f5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  color: var(--ink);
+  background: radial-gradient(circle at 20% 0%, #f3f8ff 0%, var(--blue-soft) 45%, #d7e6ff 100%);
+}
+
+.card {
+  width: 100%;
+  max-width: 640px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 32px;
+  box-shadow: 0 24px 60px rgba(31, 61, 111, 0.16);
+}
+
+.head {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+
+.logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  flex: none;
+  box-shadow: 0 6px 18px rgba(47, 107, 216, 0.22);
+}
+
+.titles h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.5px;
+  color: var(--blue-deep);
+}
+
+.subtitle {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.body {
+  margin-top: 28px;
+  min-height: 96px;
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bar {
+  position: relative;
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--blue-soft);
+  overflow: hidden;
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7fb0f5, var(--blue));
+  transition: width 0.35s ease;
+}
+
+/* 不确定进度的阶段（比如正在等 npm 干活）用条纹滚动表示还在推进。 */
+.bar.indeterminate span {
+  width: 35%;
+  transition: none;
+  animation: slide 1.4s ease-in-out infinite;
+}
+
+@keyframes slide {
+  0% {
+    margin-left: -35%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
+
+.percent {
+  min-width: 44px;
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--blue-deep);
+  font-weight: 600;
+}
+
+.message {
+  margin: 20px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.detail {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.error {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  max-height: 160px;
+  overflow: auto;
+  border-radius: 10px;
+  background: #fff5f5;
+  border: 1px solid #ffd9d9;
+  color: #a32121;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.foot {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.versions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+button {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--blue-deep);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+button:hover {
+  background: var(--blue-soft);
+  border-color: #b9d2f5;
+}
+
+button.primary {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+}
+
+button.primary:hover {
+  background: #245cc0;
+}
+
+.log {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 10px;
+  background: #0f1b2d;
+  color: #b9d2f5;
+  font-size: 11.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

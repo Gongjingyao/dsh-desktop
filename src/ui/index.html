@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'" />
+    <title>DSH Desktop</title>
+    <link rel="stylesheet" href="boot.css" />
+  </head>
+  <body>
+    <main class="card" id="card">
+      <header class="head">
+        <img class="logo" src="../../assets/logo.png" alt="DSH Desktop" />
+        <div class="titles">
+          <h1>DSH Desktop</h1>
+          <p class="subtitle" id="subtitle">正在准备 DeepSeek Harness 运行环境…</p>
+        </div>
+      </header>
+
+      <section class="body">
+        <div class="progress">
+          <div class="bar" id="bar"><span id="bar-fill"></span></div>
+          <span class="percent" id="percent">0%</span>
+        </div>
+
+        <p class="message" id="message">正在检查运行环境…</p>
+        <p class="detail" id="detail" hidden></p>
+        <pre class="error" id="error" hidden></pre>
+      </section>
+
+      <footer class="foot">
+        <div class="versions">
+          <span id="version-dsh">dsh：检测中…</span>
+          <span id="version-app"></span>
+        </div>
+        <div class="actions" id="actions">
+          <button type="button" id="btn-retry" hidden>重试</button>
+          <button type="button" id="btn-close-action">关闭窗口时…</button>
+          <button type="button" id="btn-logs">打开日志</button>
+          <button type="button" id="btn-details">显示日志</button>
+        </div>
+      </footer>
+
+      <pre class="log" id="log" hidden></pre>
+    </main>
+    <script src="boot.js"></script>
+  </body>
+</html>
