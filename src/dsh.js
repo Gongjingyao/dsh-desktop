@@ -10,9 +10,19 @@ const config = require('./config');
 /** Web UI 启动成功后打印的一行：`dsh web: <url> (LAN: <url>)`。 */
 const WEB_URL_PATTERN = /dsh web:\s*(http:\/\/\S+)/;
 const READY_TIMEOUT_MS = 180000;
-const KILL_GRACE_MS = 8000;
-/** 强杀之后再等多久就放弃等待（应用退出不能被它拖住）。 */
-const FORCE_KILL_WAIT_MS = 5000;
+/**
+ * 优雅退出的宽限期：只在这段时间内等子进程自己走，超时就强杀。
+ *
+ * Windows 上是 0，即跳过"先请求正常退出"这一步：taskkill 不带 /F 只会给有窗口的
+ * 进程发 WM_CLOSE，而 dsh 是 CREATE_NO_WINDOW 起的控制台进程，永远收不到，
+ * 结果是每次退出都白白等满宽限期（日志里那句"未在 8s 内退出，强制结束"就是它）。
+ * 实测直接强杀与先等 8s 再强杀的结果完全一样，只是快 8 秒。
+ */
+const KILL_GRACE_MS = process.platform === 'win32' ? 0 : 3000;
+/** 等 taskkill 结束整棵进程树的时间上限。 */
+const TREE_KILL_WAIT_MS = 1500;
+/** taskkill 不管用时，退回直接杀子进程，再等这么久。 */
+const CHILD_KILL_WAIT_MS = 1000;
 /** 回退到文件 stdio 时，父进程跟进日志的轮询间隔。 */
 const LOG_POLL_MS = 300;
 
@@ -36,6 +46,27 @@ function newLogPath(prefix) {
   pruneLogs(prefix);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   return path.join(config.logsDir(), `${prefix}-${stamp}.log`);
+}
+
+/** 0 号信号只做存在性检查，不会真的给进程发信号。 */
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM 说明进程还在，只是没权限碰它；其余（ESRCH/参数非法）按已退出处理。
+    return error.code === 'EPERM';
+  }
+}
+
+/** 轮询等进程真正消失，超时返回 false。刻意不用 close 事件，理由见 stop()。 */
+async function waitForExit(pid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (!isProcessAlive(pid)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 /**
@@ -105,7 +136,10 @@ class DshProcess extends EventEmitter {
 
   /** 子进程的一行输出：落盘、上报，并识别就绪 URL。 */
   #recordLine(line) {
-    this.appender?.write(`${line}\n`);
+    // 文件方式下这一行本来就是子进程写进日志文件的，父进程再写一遍就会变成
+    // "读出来 → 写回去 → 又被读出来"的自增殖循环：日志文件每次轮询都翻倍，
+    // CPU 与磁盘跟着一起烧。管道方式才需要父进程替它落盘。
+    if (!this.fileStdio) this.appender?.write(`${line}\n`);
     this.emit('output', line);
     const match = WEB_URL_PATTERN.exec(line);
     if (match && this.webUrl === null) {
@@ -281,75 +315,123 @@ class DshProcess extends EventEmitter {
       this.#write(`可执行文件：${config.resolveNodeExecutable()}`);
       this.setState('failed');
     });
-    child.once('close', (code) => {
-      clearTimeout(this.readyTimer);
-      this.#stopProgressTicker();
-      this.#stopLogPolling();
-      this.#drain();
-      this.child = null;
-      this.webUrl = null;
-      this.#write(`===== dsh 进程结束，退出码 ${code ?? 0} =====`);
-      this.appender?.end();
-      this.appender = null;
-      if (this.logHandle !== null) {
-        try {
-          fs.closeSync(this.logHandle);
-        } catch {
-          // 已经关过就忽略。
-        }
-        this.logHandle = null;
-      }
-      this.setState('idle');
-      this.emit('exit', { code: code ?? 0, stopping: this.stopping });
-    });
+    // exit 先到、close 后到（close 还要等 stdio 关闭，可能被别人持有的管道拖住）。
+    // 两个都挂上、由 #finishChild 做幂等收尾：启动失败时能早点把错误报给引导页。
+    child.once('exit', (code) => this.#finishChild(child, code ?? 0));
+    child.once('close', (code) => this.#finishChild(child, code ?? 0));
 
     return null;
   }
 
   /**
-   * 先请求正常退出，超时后连同子进程树一起强制结束。
-   * 每一步都有硬上限：退出流程绝不能因为没有 close 事件而挂住应用。
+   * 收尾一个已经结束的子进程：释放日志资源、清引用、上报 exit。
+   *
+   * 幂等，且只认"当前"这个子进程：stop() 之后可能已经拉起了新的那个，
+   * 迟到的 close 不能把新进程的状态一起清掉（那会让重启后的服务变成孤儿）。
+   * @param {import('node:child_process').ChildProcess} child
+   * @param {number|null} code - 退出码；null 表示是被我们终止的，拿不到退出码
+   */
+  #finishChild(child, code) {
+    if (this.child !== child) return;
+    clearTimeout(this.readyTimer);
+    this.#stopProgressTicker();
+    this.#stopLogPolling();
+    this.#drain();
+    this.child = null;
+    this.webUrl = null;
+    this.#write(`===== dsh 进程结束（${code === null ? '已被终止' : `退出码 ${code}`}）=====`);
+    this.appender?.end();
+    this.appender = null;
+    if (this.logHandle !== null) {
+      try {
+        fs.closeSync(this.logHandle);
+      } catch {
+        // 已经关过就忽略。
+      }
+      this.logHandle = null;
+    }
+    this.setState('idle');
+    this.emit('exit', { code: code ?? 0, stopping: this.stopping });
+  }
+
+  /** 用 taskkill 结束整棵进程树（dsh 会派生工作进程，只杀直接子进程会留下孤儿）。 */
+  #taskkill(pid) {
+    try {
+      const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      // taskkill 拉不起来时不能让未处理的 error 事件把主进程带崩。
+      killer.on('error', (error) => this.#write(`调用 taskkill 失败：${error.message}`));
+      killer.unref();
+    } catch (error) {
+      this.#write(`调用 taskkill 失败：${error.message}`);
+    }
+  }
+
+  /**
+   * 强制结束子进程树。
+   * @returns {Promise<boolean>} 进程是否确认已退出
+   */
+  async #forceKill(child) {
+    const pid = child.pid;
+    if (process.platform === 'win32') {
+      this.#taskkill(pid);
+      if (await waitForExit(pid, TREE_KILL_WAIT_MS)) return true;
+      // taskkill 在受限环境里会直接失败（安全软件、权限不足都报 Access denied）。
+      // 父进程杀自己拉起来的子进程几乎总是可行，用它兜住。
+    } else {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // 已经退出就忽略。
+      }
+      return waitForExit(pid, TREE_KILL_WAIT_MS);
+    }
+    try {
+      child.kill();
+    } catch {
+      // 已经退出就忽略。
+    }
+    return waitForExit(pid, CHILD_KILL_WAIT_MS);
+  }
+
+  /**
+   * 先请求正常退出（非 Windows），宽限期内没走就连同子进程树一起强制结束。
+   *
+   * 判断"死没死"用的是进程本身（0 号信号探测），**刻意不等 close 事件**：
+   * close 要等子进程的 stdio 全部关闭，而 dsh 会派生出持有同一批管道的工作进程，
+   * close 因此可能拖到几秒甚至更久才来——老实现就是卡在这里，让"退出/重启服务"
+   * 白等 8s + 5s，用户点了托盘里的退出像是没反应。
    */
   async stop() {
     const child = this.child;
     if (child === null) return;
     this.stopping = true;
     const pid = child.pid;
+    const startedAt = Date.now();
     this.#write('正在停止 dsh…');
 
-    const closed = new Promise((resolve) => child.once('close', resolve));
-    const wait = (ms) => Promise.race([closed, new Promise((resolve) => setTimeout(resolve, ms))]);
-
-    const terminate = (force) => {
-      if (process.platform !== 'win32') {
-        child.kill(force ? 'SIGKILL' : 'SIGTERM');
-        return;
-      }
+    if (KILL_GRACE_MS > 0) {
+      // 只有非 Windows 才有真正的"请求正常退出"，先给 dsh 一个体面的机会。
       try {
-        // Windows 没有真正的 SIGTERM：先不带 /F 请求退出，不行再强杀整棵进程树。
-        spawn('taskkill', ['/PID', String(pid), '/T', ...(force ? ['/F'] : [])], {
-          windowsHide: true,
-          stdio: 'ignore',
-        });
+        child.kill('SIGTERM');
       } catch {
-        try {
-          child.kill();
-        } catch {
-          // 进程可能已经退出，忽略。
-        }
+        // 已经退出就忽略。
       }
-    };
-
-    terminate(false);
-    await wait(KILL_GRACE_MS);
-    if (this.child !== null) {
-      this.#write(`dsh 未在 ${KILL_GRACE_MS / 1000}s 内退出，强制结束。`);
-      terminate(true);
-      await wait(FORCE_KILL_WAIT_MS);
+      if (!(await waitForExit(pid, KILL_GRACE_MS))) {
+        this.#write(`dsh 未在 ${KILL_GRACE_MS / 1000}s 内退出，强制结束。`);
+      }
     }
-    if (this.child !== null) {
+    if (isProcessAlive(pid) && !(await this.#forceKill(child))) {
       this.#write(`dsh 进程 ${pid} 仍未退出，先继续退出应用。`);
     }
+
+    const exited = !isProcessAlive(pid);
+    this.#write(`dsh 已停止（耗时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s）`);
+    // 进程确认不在了就立刻收拾干净：重启服务不必等迟到的 close，否则 start() 会
+    // 因为 this.child 还在而直接返回，重启看起来"没生效"。
+    if (exited) this.#finishChild(child, null);
     this.stopping = false;
   }
 

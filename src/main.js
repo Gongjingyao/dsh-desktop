@@ -8,8 +8,10 @@ const path = require('node:path');
 app.setName('DSH Desktop');
 app.setPath('userData', path.join(app.getPath('appData'), 'dsh-desktop'));
 
+const balance = require('./balance');
 const config = require('./config');
 const runtime = require('./runtime');
+const runtimePatch = require('./runtime-patch');
 const updater = require('./updater');
 const { DshProcess, writeCliLauncher } = require('./dsh');
 
@@ -36,6 +38,10 @@ let updateTimer = null;
 let updateInFlight = false;
 /** 用户明确要求退出时置为 true，用来区分「关窗口」和「真退出」。 */
 let quitting = false;
+/** 退出收尾（停子进程）进行中：期间的重复退出请求一律挡回去。 */
+let shutdownInFlight = false;
+/** 余额查询进行中：连点菜单不该并发发多次请求。 */
+let balanceInFlight = false;
 
 let appLogStream = null;
 
@@ -86,6 +92,9 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
+  // 引导页脚本挂上监听之前推过去的状态会丢（启动现在和窗口加载并行，这个窗口期
+  // 是真实存在的），所以每次加载完成都补推一次当前状态。
+  mainWindow.webContents.on('did-finish-load', () => pushState({}));
   mainWindow.on('close', (event) => {
     // 「最小化到托盘」时关窗口只是藏起来：服务继续跑，托盘图标还能唤回来。
     if (quitting || config.readSettings().closeAction !== 'tray') return;
@@ -138,6 +147,9 @@ let trayHintShown = false;
 function notifyHiddenToTray() {
   if (trayHintShown) return;
   trayHintShown = true;
+  // 只留一个提醒通道。原先这里还调了 tray.displayBalloon：老的托盘气泡与下面这条
+  // 系统通知会同时弹出来（用户看到"两次提醒"），而且展开任务栏折叠区时 Windows
+  // 还会把气泡重播一遍。要提示就用系统通知，它还能点开窗口。
   try {
     if (Notification.isSupported()) {
       const hint = new Notification({
@@ -151,7 +163,6 @@ function notifyHiddenToTray() {
   } catch (error) {
     log(`托盘提示发送失败：${error.message}`);
   }
-  tray?.displayBalloon?.({ title: 'DSH 桌面端', content: '已最小化到托盘' });
 }
 
 /** 让用户选择关闭窗口的行为，并记住选择。 */
@@ -177,6 +188,87 @@ async function chooseCloseAction() {
     log('未勾选记住选择，本次仅临时生效');
   }
   return action;
+}
+
+/**
+ * 弹出原生对话框。窗口可见时挂在窗口上（居中且模态），窗口在托盘里藏着时用独立对话框——
+ * 挂在隐藏窗口上的消息框用户根本看不到。
+ */
+function messageBox(options) {
+  const visible = mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.isVisible();
+  return visible ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options);
+}
+
+/** 查一次 DeepSeek 账户余额并展示；用户点「刷新」就再查一次。 */
+async function checkAccountBalance() {
+  if (balanceInFlight) return;
+  balanceInFlight = true;
+  try {
+    for (;;) {
+      let result;
+      try {
+        result = await balance.fetchBalance();
+      } catch (error) {
+        await showBalanceError(error);
+        return;
+      }
+      // 日志只记"查成功了"和币种：金额与密钥都不落盘。
+      const currencies = result.balance.infos.map((info) => info.currency).filter(Boolean).join('/');
+      log(`余额查询成功：${balance.balanceSummary(result)}（${currencies || '无明细'}）`);
+      const { response } = await messageBox({
+        type: 'info',
+        title: '账户余额',
+        message: balance.balanceSummary(result),
+        detail: balance.balanceDetail(result),
+        buttons: ['刷新', '关闭'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+      });
+      if (response !== 0) return;
+    }
+  } finally {
+    balanceInFlight = false;
+  }
+}
+
+/** 余额查不出来时的提示：没配密钥和"查失败"是两种事，分开说。 */
+async function showBalanceError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  log(`余额查询失败：${message}`);
+  const credentialsPath = path.join(config.dshHome(), '.credentials.yaml');
+
+  if (error?.code === 'NO_KEY') {
+    const { response } = await messageBox({
+      type: 'info',
+      title: '账户余额',
+      message: '还没有配置 DeepSeek API Key',
+      detail: [
+        '客户端按这个顺序找密钥：',
+        '1. 启动环境变量 DEEPSEEK_API_KEY',
+        `2. 凭据文件 ${credentialsPath}`,
+        `3. 环境文件 ${path.join(config.dshHome(), '.env')}`,
+        '',
+        '在 dsh 界面里「设置 → 模型」填一次 API Key，就会写进第 2 个文件。',
+      ].join('\n'),
+      buttons: ['打开凭据目录', '关闭'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (response === 0) await shell.openPath(config.ensureDir(config.dshHome()));
+    return;
+  }
+
+  await messageBox({
+    type: 'warning',
+    title: '余额查询失败',
+    message: '没能查到账户余额',
+    detail: `${message}\n\n查询地址：${balance.baseUrl()}${balance.BALANCE_PATH}`,
+    buttons: ['关闭'],
+    defaultId: 0,
+    noLink: true,
+  });
 }
 
 /** 创建/刷新托盘。菜单里的「关闭窗口时」会勾选当前设置。 */
@@ -208,6 +300,7 @@ function createTray() {
         },
       },
       { label: '检查更新…', click: () => void checkUpdatesManually() },
+      { label: '查看余额…', click: () => void checkAccountBalance() },
       { type: 'separator' },
       {
         label: '关闭窗口时',
@@ -242,10 +335,34 @@ function refreshTray() {
   createTray();
 }
 
-/** 真正退出应用。窗口的 close 处理会看这个标记决定是隐藏还是放行。 */
+/**
+ * 真正退出应用。窗口的 close 处理会看 quitting 决定是隐藏还是放行。
+ *
+ * 这里必须挡住重复调用：收尾期间（停子进程要几百毫秒）再点一次"退出"不应该
+ * 被当成一次全新的退出流程重来。
+ */
 function quitApp() {
+  if (quitting) return;
   quitting = true;
+  log('收到退出请求，正在退出…');
   app.quit();
+}
+
+/** 退出时先收起窗口与托盘图标：让"点了退出"马上有视觉反馈，服务在原地收尾。 */
+function hideForQuit() {
+  if (mainWindow !== null && !mainWindow.isDestroyed()) mainWindow.hide();
+  if (tray === null) return;
+  const pending = tray;
+  tray = null;
+  // 退出可能是从托盘菜单本身的点击回调里发起的，销毁 Tray 要离开这个回调栈，
+  // 否则 Windows 上会留下一个点不动的"幽灵图标"。
+  setImmediate(() => {
+    try {
+      pending.destroy();
+    } catch {
+      // 已经销毁过就忽略。
+    }
+  });
 }
 
 /** 重启本地 dsh 服务，并把界面切回它。 */
@@ -277,14 +394,20 @@ function waitForReady(instance) {
 }
 
 /**
- * 完整启动流程：检查运行环境 → 有必要就装/更新 dsh → 启动服务 → 打开 Web UI。
+ * 完整启动流程：确定本地运行时 →（必要时）联网安装/更新 → 启动服务 → 打开 Web UI。
+ *
+ * 核心约束：**启动路径不依赖网络**。本地已经装好 dsh 时直接起服务，版本检查挪到
+ * 界面出来之后在后台做。之前每次启动都要先联网查最新版（断网时两个镜像各等 15s），
+ * 查到新版本还要先跑完 npm 安装才肯起服务——用户只能对着进度条干等，断网时甚至直接
+ * 报"启动失败"，明明本地就有一份能用的运行时。
  *
  * 全程用一个百分比表达进度：每 2% 推一次状态，避免高频刷新渲染进程。
  * @param {object} [options]
- * @param {boolean} [options.autoUpdate] - 是否在启动阶段直接安装发现的新版本
+ * @param {boolean} [options.install] - 先联网装/更新到最新版再启动（用户点了「立即更新」）
+ * @param {boolean} [options.checkAfterReady] - 界面就绪后在后台查新版本，有新版本问一句
  */
 async function bootSequence(options = {}) {
-  const { autoUpdate = false } = options;
+  const { install = false, checkAfterReady = false } = options;
   if (updateInFlight) return;
 
   let lastReported = -1;
@@ -298,43 +421,47 @@ async function bootSequence(options = {}) {
   updateInFlight = true;
   boot.percent = 0;
   lastReported = -1;
-  report(2, '正在检查运行环境…', { status: 'checking', error: null, detail: '' });
+  const startedAt = Date.now();
+  report(2, '正在准备运行环境…', { status: 'checking', error: null, detail: '' });
 
   log(`数据目录：${config.dataRoot()}`);
   log(`DSH_HOME：${config.dshHome()}`);
   log(`Node 运行时：${config.resolveNodeExecutable()}`);
 
   try {
-    const check = await updater.checkRuntime();
-    report(8, undefined, { installedVersion: check.current, latestVersion: check.latest });
+    const installed = runtime.installedVersion();
+    const usable = installed !== null && fs.existsSync(config.runtimeEntry());
 
-    if (check.current === null) {
-      log(`未检测到 dsh，开始安装 ${check.latest}（镜像 ${check.registry}）`);
-      report(10, `正在安装 dsh ${check.latest}…`, { status: 'installing' });
-      const version = await runtime.installDsh({
-        onLine: log,
-        onProgress: (percent) => report(10 + percent * 0.68, undefined, { status: 'installing' }),
-      });
-      report(78, undefined, { installedVersion: version, latestVersion: version });
-    } else if (runtime.compareVersions(check.latest, check.current) > 0) {
-      log(`发现新版 dsh：${check.current} → ${check.latest}`);
-      if (autoUpdate) {
-        report(10, `正在更新到 dsh ${check.latest}…`, { status: 'installing' });
+    if (install || !usable) {
+      // 只有本地没有可用运行时、或用户明确要求更新时才联网。
+      const check = await updater.checkRuntime();
+      report(8, undefined, { installedVersion: check.current, latestVersion: check.latest });
+      if (check.current === null || check.updateAvailable) {
+        log(`${check.current === null ? '未检测到 dsh' : `发现新版 dsh：${check.current} → ${check.latest}`}，开始安装（镜像 ${check.registry}）`);
+        report(10, `正在安装 dsh ${check.latest}…`, {
+          status: 'installing',
+          detail: '需要联网下载运行环境，装好之后就不再需要联网了。',
+        });
         const version = await runtime.installDsh({
           onLine: log,
           onProgress: (percent) => report(10 + percent * 0.68, undefined, { status: 'installing' }),
         });
-        log(`已更新到 dsh ${version}`);
         report(78, undefined, { installedVersion: version, latestVersion: version });
       } else {
-        log(`本次按原版本 ${check.current} 启动`);
-        report(30);
+        log(`dsh ${check.current} 已是最新版本`);
+        report(78, undefined, { installedVersion: check.current, latestVersion: check.latest });
       }
     } else {
-      log(`dsh ${check.current} 已是最新版本`);
+      log(`本地已有 dsh ${installed}，直接启动（版本检查放到界面就绪之后）`);
+      report(30, undefined, { installedVersion: installed, latestVersion: installed });
     }
 
-    report(80, '正在启动 dsh 服务…', { status: 'starting', detail: '首次启动需要初始化会话目录，请稍候。' });
+    // 起服务之前先把「隐藏控制台窗口」的补丁确认一遍：dsh 升级会重装 node_modules，
+    // 补丁跟着没了，闪窗会回来，所以每次启动都补一次（幂等，已打过就直接跳过）。
+    runtimePatch.ensureRuntimeConsoleHidden({ onLine: log });
+
+    report(80, '正在启动 dsh 服务…', { status: 'starting' });
+    const serviceStartedAt = Date.now();
     dsh = new DshProcess();
     dsh.on('progress', (percent) => report(percent));
     dsh.on('exit', ({ stopping }) => {
@@ -346,9 +473,16 @@ async function bootSequence(options = {}) {
     const url = await ready;
     if (url === null) throw new Error('未能获取 Web UI 地址');
 
-    log(`dsh 已就绪：${url}`);
+    // 把服务启动耗时单独记一笔：客户端自己的开销已经压到最低，
+    // 这里剩下的就是 dsh 自身启动的时间，慢了也知道该找谁。
+    log(
+      `dsh 已就绪：${url}（服务启动 ${((Date.now() - serviceStartedAt) / 1000).toFixed(1)}s，` +
+        `本次启动共 ${((Date.now() - startedAt) / 1000).toFixed(1)}s）`,
+    );
     report(100, '正在打开界面…', { status: 'ready' });
     await showWebUi(url);
+
+    if (checkAfterReady) void checkRuntimeUpdateAfterBoot();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log(`启动失败：${message}`);
@@ -358,15 +492,61 @@ async function bootSequence(options = {}) {
   }
 }
 
-/** 停掉本地服务、装最新版 dsh、再走一遍启动流程（期间自动装更新）。 */
+/**
+ * 界面就绪后的后台版本检查：查到新版本只问一句，绝不让启动路径等它。
+ * 断网、镜像不稳都只记日志——界面已经能用了，不该因此报错。
+ */
+async function checkRuntimeUpdateAfterBoot() {
+  try {
+    const check = await updater.checkRuntime();
+    const current = check.current ?? runtime.installedVersion();
+    if (current === null || !check.updateAvailable) {
+      log(`dsh ${current ?? '未安装'} 已是最新版本`);
+      return;
+    }
+    if (config.readSettings().lastNotifiedVersion === check.latest) {
+      log(`dsh ${check.latest} 已经提示过，本次不再打扰`);
+      return;
+    }
+    log(`发现新版 dsh：${current} → ${check.latest}，等待用户确认`);
+    config.writeSettings({ lastNotifiedVersion: check.latest });
+    await promptRuntimeUpdate(current, check.latest);
+  } catch (error) {
+    log(`后台检查 dsh 版本失败（不影响本次使用）：${error.message}`);
+  }
+}
+
+/**
+ * 发现新版本时问一句，用户同意就停服务、装新版、再用新版本把服务拉起来。
+ * 「启动后的后台检查」「手动检查」「每 30 分钟的周期检查」三处共用，措辞只维护一份。
+ * @returns {Promise<boolean>} 是否已按用户意愿触发更新
+ */
+async function promptRuntimeUpdate(current, latest) {
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    buttons: ['立即更新', '稍后'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'dsh 有新版本',
+    message: `dsh ${latest} 已发布`,
+    detail: `当前版本 ${current}。更新会重启本地服务，进行中的会话可能中断。`,
+  });
+  if (response !== 0) return false;
+  await updateRuntime();
+  return true;
+}
+
+/** 停掉本地服务、装最新版 dsh、再把服务拉起来（用户确认更新后走这里）。 */
 async function updateRuntime() {
   if (updateInFlight) return;
   if (dsh !== null) {
     await dsh.stop();
     dsh = null;
   }
+  // 安装期间把窗口切回引导页：服务已经停了，留在 Web UI 上只会是一片死页面。
+  if (mainWindow !== null && !mainWindow.isDestroyed()) await mainWindow.loadFile(BOOT_PAGE);
   boot.percent = 0;
-  await bootSequence({ autoUpdate: true });
+  await bootSequence({ install: true });
 }
 
 /** 手动触发一次检查；发现新版本时问一句再更新。 */
@@ -375,16 +555,7 @@ async function checkUpdatesManually() {
   try {
     const result = await updater.checkAll(log);
     if (result.runtime?.updateAvailable && result.runtime.current !== null) {
-      const { response } = await dialog.showMessageBox(mainWindow, {
-        type: 'info',
-        buttons: ['立即更新', '稍后'],
-        defaultId: 0,
-        cancelId: 1,
-        title: 'dsh 有新版本',
-        message: `dsh ${result.runtime.latest} 已发布`,
-        detail: `当前版本 ${result.runtime.current}。更新会重启本地服务，进行中的会话可能中断。`,
-      });
-      if (response === 0) await updateRuntime();
+      await promptRuntimeUpdate(result.runtime.current, result.runtime.latest);
       return;
     }
     const current = result.runtime?.current ?? runtime.installedVersion();
@@ -414,16 +585,7 @@ async function pollUpdates() {
       const changed = config.readSettings().lastNotifiedVersion !== result.runtime.latest;
       if (changed) {
         config.writeSettings({ lastNotifiedVersion: result.runtime.latest });
-        const { response } = await dialog.showMessageBox(mainWindow, {
-          type: 'info',
-          buttons: ['立即更新', '稍后'],
-          defaultId: 0,
-          cancelId: 1,
-          title: 'dsh 有新版本',
-          message: `dsh ${result.runtime.latest} 已发布`,
-          detail: `当前版本 ${result.runtime.current}。更新会重启本地服务，进行中的会话可能中断。`,
-        });
-        if (response === 0) void updateRuntime();
+        await promptRuntimeUpdate(result.runtime.current, result.runtime.latest);
       }
     }
     if (result.app?.updateAvailable) {
@@ -458,7 +620,7 @@ function registerIpc() {
   ipcMain.handle('boot:action', async (_event, name) => {
     switch (name) {
       case 'retry':
-        void bootSequence({ autoUpdate: true });
+        void bootSequence({ checkAfterReady: true });
         return true;
       case 'update':
         void updateRuntime();
@@ -540,6 +702,7 @@ function buildMenu() {
       label: '维护',
       submenu: [
         { label: '检查更新…', click: () => void checkUpdatesManually() },
+        { label: '查看余额…', click: () => void checkAccountBalance() },
         { label: '重新启动 dsh 服务', click: () => void restartService() },
         { type: 'separator' },
         {
@@ -610,10 +773,12 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu();
     createTray();
     writeCliLauncher();
-    await createWindow();
     scheduleUpdateChecks();
-    // 启动阶段主动检查：有新版本就直接装上，再启动服务。
-    void bootSequence({ autoUpdate: true });
+    // 窗口加载与 dsh 启动并行：不等窗口画完再拉服务，省掉这 1~2 秒。
+    // 本地已有运行时直接起服务，新版本改为界面就绪后在后台问一句。
+    const windowLoaded = createWindow();
+    void bootSequence({ checkAfterReady: true });
+    await windowLoaded;
   });
 
   app.on('window-all-closed', () => {
@@ -625,17 +790,27 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', (event) => {
     clearInterval(updateTimer);
     quitting = true;
+    // 收尾期间冒出来的退出请求一律挡回去：停子进程不能被打断，
+    // 收尾完成后由下面的 app.quit() 统一放行。
+    if (shutdownInFlight) {
+      event.preventDefault();
+      return;
+    }
     if (dsh === null) return;
     event.preventDefault();
+    shutdownInFlight = true;
     // 退出时收掉 dsh 子进程，避免留下孤儿服务占用端口与句柄。
-    // 先停进程再释放句柄，最后无条件放行退出。
+    // 先把引用摘掉再停进程：这次 app.quit() 会被拦下，收尾完成后重放的那次才会放行。
     const pending = dsh;
     dsh = null;
+    hideForQuit();
     void pending
       .stop()
       .catch(() => {})
       .finally(() => {
         pending.dispose();
+        shutdownInFlight = false;
+        log('本地服务已停止，应用退出。');
         app.quit();
       });
   });
