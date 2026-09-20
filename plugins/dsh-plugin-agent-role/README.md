@@ -63,20 +63,31 @@ tool call 找不到对应工具，所以官方不支持会话中途切换 preset
     - id: agent-role
       name: agent-role
       config:
-        defaultRole: my-default
+        defaultRole: frontend-dev
         roles:
-          my-default:
-            name: 我的常用角色
+          frontend-dev:
+            name: 前端开发者
             prompt: |
-              用户把这次会话固定为「我的常用角色」……（此处是完整的人设文本）
+              你是资深前端工程师……（此处是完整的人设文本）
           reviewer:
             name: 严格评审员
             prompt: |
               你只做代码评审，不写实现。逐条列出问题并标注严重度。
 ```
 
-`roles` 省略时使用内置的**「我的常用角色」**（内容取自 `~/.dsh/AGENTS.md` 的常驻工作准则）。
-角色 id 必须匹配 `[a-z0-9][a-z0-9-]*`。
+`roles` 省略时使用下面三个内置角色；角色 id 必须匹配 `[a-z0-9][a-z0-9-]*`。
+
+### 内置角色（`lib/roles.js`）
+
+| id | 名称 | 定位 |
+| --- | --- | --- |
+| `my-default`（默认） | 我的常用角色 | 只留与角色、项目无关的通用约束（中文结论先行 / 不确定就问 / 先确认现状 / 沿用既有风格 / 汇报四段），作兜底 |
+| `frontend-dev` | 前端开发者 | 资深前端工程师的完整工作准则（代码价值观、执行纪律、委派政策、场景资产）。原来放在 `~/.dsh/AGENTS.md`，现已迁到本角色 |
+| `product-partner` | 需求搭档 | 需求沟通与方案调优：只做对齐与调优、不写实现；动笔要用的七要素/边界清单/六问在 `requirement-analysis` skill 里按需加载 |
+
+按"要不要写代码"分工，切角色只换人设、不动工具集，所以同一次对话里可随时用 `/role` 切换。
+内置人设文本与仓库里 `_selftest/roles/*.md`（装配脚本的输入）逐字一致，
+`_selftest/agent-role/builtin-roles-check.js` 会断言这一点。
 
 **`description` 字段**显示在「设置 → 插件」那一行的备注里（不写就照旧显示 loader 行 id）。
 它由桌面端的运行时补丁透出，见下文「插件列表里的功能说明」。
