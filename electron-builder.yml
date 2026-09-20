@@ -17,6 +17,10 @@ nodeGypRebuild: false
 files:
   - src/**/*
   - assets/**/*
+  # 随包发布的 dsh 插件：启动时由 src/plugin-install.js 复制进 DSH_HOME。
+  # 注意别把插件自己的 node_modules（开发态是个指向安装闭包的链接）打进来。
+  - plugins/**/*
+  - "!plugins/**/node_modules"
   - package.json
 
 extraMetadata:

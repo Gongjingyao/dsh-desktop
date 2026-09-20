@@ -10,6 +10,7 @@ app.setPath('userData', path.join(app.getPath('appData'), 'dsh-desktop'));
 
 const balance = require('./balance');
 const config = require('./config');
+const pluginInstall = require('./plugin-install');
 const runtime = require('./runtime');
 const runtimePatch = require('./runtime-patch');
 const updater = require('./updater');
@@ -459,6 +460,12 @@ async function bootSequence(options = {}) {
     // 起服务之前先把「隐藏控制台窗口」的补丁确认一遍：dsh 升级会重装 node_modules，
     // 补丁跟着没了，闪窗会回来，所以每次启动都补一次（幂等，已打过就直接跳过）。
     runtimePatch.ensureRuntimeConsoleHidden({ onLine: log });
+    // 插件列表的「功能说明」字段同理：补丁没了就只剩模块名与行 id（不影响其它功能）。
+    runtimePatch.ensurePluginListDescription({ onLine: log });
+    // 「在文件资源管理器中显示」：dsh 给 explorer.exe 也加了 windowsHide，窗口会被一起压掉。
+    runtimePatch.ensureNativeOpenVisible({ onLine: log });
+    // 随包发布的角色插件：装进 DSH_HOME，dsh 起来就能按包名解析到（幂等，内容一致就不写盘）。
+    pluginInstall.ensureAgentRolePlugin({ onLine: log });
 
     report(80, '正在启动 dsh 服务…', { status: 'starting' });
     const serviceStartedAt = Date.now();
