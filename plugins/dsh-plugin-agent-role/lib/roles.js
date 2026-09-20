@@ -14,8 +14,9 @@
  * 3. `product-partner`（需求搭档）：需求沟通与方案调优。它只负责聊与对齐，动笔要用的
  *    七要素、边界清单、方案调优六问在 `requirement-analysis` skill 里按需加载。
  *
- * 文本与 `_selftest/roles/*.md`（装配脚本 `_selftest/apply-roles.js` 的输入）逐字一致，
- * 改文案时两边一起改；`_selftest/agent-role/builtin-roles-check.js` 会断言这一点。
+ * 生成区（下面三份人设文本 + `BUILTIN_ROLES`）由 `scripts/sync-roles.js` 从 `roles/*.md` 生成：
+ * 改人设请改 `roles/*.md` 再跑 `npm run roles`，`npm run roles:check` 校验是否已同步；
+ * `_selftest/agent-role/builtin-roles-check.js` 会在测试里再断言一次。生成区之外（校验函数等）是手写的。
  */
 
 /** 角色 id 规则：能直接当 YAML 键和命令参数用。 */
@@ -24,6 +25,7 @@ const ROLE_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 /** 默认角色 id：没有显式切换过的会话用它。 */
 const DEFAULT_ROLE_ID = 'my-default';
 
+// #region 生成区：由 scripts/sync-roles.js 从 roles/*.md 生成，勿手改
 /** 「我的常用角色」：与具体角色、具体项目无关的通用约束，任何会话都适用。 */
 const MY_DEFAULT_PROMPT = `通用约束（与具体角色、具体项目无关，任何会话都适用）：
 
@@ -122,6 +124,7 @@ const BUILTIN_ROLES = {
     prompt: PRODUCT_PARTNER_PROMPT,
   },
 };
+// #endregion 生成区
 
 /**
  * 校验一份角色定义并归一化。

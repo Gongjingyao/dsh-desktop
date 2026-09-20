@@ -12,6 +12,8 @@
     "check-exit": "node scripts/check-exit.js",
     "check-balance": "node scripts/check-balance.js",
     "self-test": "node scripts/self-test.js",
+    "roles": "node scripts/sync-roles.js",
+    "roles:check": "node scripts/sync-roles.js --check",
     "dist": "node scripts/dist.js"
   },
   "devDependencies": {

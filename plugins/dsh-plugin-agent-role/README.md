@@ -86,8 +86,17 @@ tool call 找不到对应工具，所以官方不支持会话中途切换 preset
 | `product-partner` | 需求搭档 | 需求沟通与方案调优：只做对齐与调优、不写实现；动笔要用的七要素/边界清单/六问在 `requirement-analysis` skill 里按需加载 |
 
 按"要不要写代码"分工，切角色只换人设、不动工具集，所以同一次对话里可随时用 `/role` 切换。
-内置人设文本与仓库里 `_selftest/roles/*.md`（装配脚本的输入）逐字一致，
-`_selftest/agent-role/builtin-roles-check.js` 会断言这一点。
+
+内置人设文本的**唯一来源**是 `roles/*.md`，`lib/roles.js` 的「生成区」由脚本生成：
+
+```powershell
+npm run roles         # 改过 roles/*.md 之后重新生成 lib/roles.js
+npm run roles:check   # 只校验是否已同步（提交前 / CI，未同步则退出码 1）
+```
+
+生成（而不是运行时读文件）是为了让插件保持自包含：运行时零新增失败面（文件缺失、打包路径差异都不影响），
+代价只是改文案后要多跑一条命令。`_selftest/agent-role/builtin-roles-check.js` 会在测试里再断言一次
+"生成区与源文件逐字一致"。
 
 **`description` 字段**显示在「设置 → 插件」那一行的备注里（不写就照旧显示 loader 行 id）。
 它由桌面端的运行时补丁透出，见下文「插件列表里的功能说明」。
@@ -188,6 +197,7 @@ powershell -File scripts\install-agent-role.ps1
 | 文件 | 作用 |
 |---|---|
 | `lib/index.js` | 宿主半边：角色服务、`role` 投影、`/role` 命令、`deployment:role` 动态段落、设置命名空间 |
-| `lib/roles.js` | 内置角色与角色表校验 |
+| `lib/roles.js` | 内置角色与角色表校验（生成区由 `scripts/sync-roles.js` 从 `roles/*.md` 生成） |
+| `roles/*.md` | 三份人设文本的唯一来源：`my-default` / `frontend-dev` / `product-partner` |
 | `lib/client.js` | 浏览器半边：`/role` 弹出选择器 + 输入框工具行的当前角色标签（`conversation.input.left` 插槽，`useProjection("role")`）+ 两级「角色」设置页 |
 
