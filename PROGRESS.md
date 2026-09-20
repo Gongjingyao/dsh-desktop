@@ -1,9 +1,68 @@
 # DSH Desktop 交付说明
 
-**交付物**：`release\DSH-Desktop-Setup-0.1.1-x64.exe`（101,429,522 字节 ≈ 96.7 MB，NSIS 安装包）
-**状态**：已完成并验证通过。0.1.1 = 首个提交之后累积的全部改动（启动慢 / 托盘退出 / 重复托盘提醒 /
-日志自增殖 + 运行时「隐藏控制台窗口」补丁），加上本轮新增的「查看余额」；版本号按你的要求统一记为
-0.1.1。与 0.1.0 是同一 appId 的同一个产品，新包可直接覆盖安装。
+**交付物**：`release\DSH-Desktop-Setup-0.1.2-x64.exe`（101,445,061 字节 ≈ 96.7 MB，NSIS 安装包）
+**状态**：已完成并验证通过。本包 = 0.1.1 的全部内容 + 「插件列表功能说明」运行时补丁
++ 本机可用的打包入口 + 本节第四轮的两项：**角色插件随包安装**、「在文件资源管理器中显示」窗口修复。
+与 0.1.1 是同一 appId 的同一个产品，新包可直接覆盖安装。
+
+> **版本号**：第四轮的改动原先按 0.1.3 打过一次（被打断），按你的要求改回 **0.1.2** 重打；
+> 同名旧包已删除，release 下现在只有这一个安装器。`npm run dist` 现在**每次打包前都会先清理
+> release 里的旧产物**（旧 exe/7z 与 `win-unpacked`），不会再出现新旧包并存。
+>
+> **这次改动要生效得先退出正在运行的客户端**：本机运行中的是 0.1.1，里面没有本轮补丁，
+> 也没有启动时装插件的那段代码；装完新包（或重启应用）才生效。
+
+> 0.1.1（历史）：`release\DSH-Desktop-Setup-0.1.1-x64.exe`（101,429,522 字节），首个提交之后累积的
+> 全部改动（启动慢 / 托盘退出 / 重复托盘提醒 / 日志自增殖 + 运行时「隐藏控制台窗口」补丁）
+> 加「查看余额」。
+
+## 0.1.2 新增（本交付已包含）
+
+### 1. 插件列表的「功能说明」字段（运行时补丁）
+
+设置 → 插件 里每一行原本只显示模块名与 Loader 行 id，没有任何说明字段（数据里也没有）。
+现在桌面端启动时会给运行时打一个幂等补丁：宿主 `dsh-host-plugin-inventory` 在每条 entry 上透出
+插件行 `config.description`，浏览器 `dsh-client-ui-settings-plugin-inventory` 让备注行优先显示它
+（没有该字段就退回行 id，其它插件行为不变）。插件侧见
+`plugins/dsh-plugin-agent-role/README.md` 的「插件列表里的功能说明」。
+
+### 2. 打包入口 `scripts/dist.js`（`npm run dist`）
+
+原来的 `electron-builder --win nsis` 在本机跑不起来，本轮的脚本把三个坑都绕开了，并且在
+`README.md` 里记了一条。三个坑按踩到的顺序：
+
+| 现象 | 根因 | 处理 |
+| --- | --- | --- |
+| `Unknown argument: ...\electron-builder\out\cli\cli.js` | Electron-as-node 下 CLI 的 yargs 把入口脚本路径当成「项目目录」位置参数 | 不走 CLI，直接调 Node API（`build({targets, projectDir, config})`） |
+| `Cannot find module 'node:child_process'` | PATH 上的 node 是 v12，不认 `node:` 前缀 | 该脚本只用旧 Node 也支持的写法；Node < 14 时自动用 Electron 自带的 Node 24 重新执行自己 |
+| 复制 Electron 发行版时 `ENOTDIR` | **在 Electron 的 Node 下跑打包**：Electron 的 fs 把 `.asar` 当目录，`readdir` 能列出 `default_app.asar` 的归档内容，于是 electron-builder 钻进这个"虚拟目录"，而目标侧它是普通文件 | 打包时强制 `ELECTRON_NO_ASAR=1`（并用 `scripts/dist.js` 直接拒绝没设该变量的 Electron 运行） |
+
+第三条是最难查的一条：报错信息里没有路径，堆栈只指到 builder-util 的 walk/copyDir。定位方式是给
+`builder-util/out/fs.js` 临加诊断（打完即还原），打印出失败的 `file`/`parent`/目标路径，再单独写
+`_selftest/asar-probe.js` 对比 `ELECTRON_NO_ASAR` 开关下 `lstat/readdir` 的行为差异 —— 开着时
+`lstat` 报 `isDirectory=true`，关掉后正常是文件。
+
+**打包前清场**：`cleanRelease()` 会在 build 之前删掉 release 里的旧安装器（`*.exe` / `*.7z` /
+`*.blockmap`）与 `win-unpacked`。两个原因：旧包留着容易让人装错版本；上一轮的 `win-unpacked`
+被 Defender 扫过之后常处于占用状态，留着它打包可能中途 EBUSY。只删产物，`builder-debug.yml`
+之类保留。
+
+### 验证（都是真跑出来的）
+
+| 项目 | 方式 | 结果 |
+| --- | --- | --- |
+| 打包成功 | `npm run dist`（系统 npm 6 + Node 12，脚本自动切 Node 24） | PASS：`release\DSH-Desktop-Setup-0.1.2-x64.exe`，101,445,450 字节（第四轮重打后的数字） |
+| 版本元数据 | `DSH 桌面端.exe` 的 VersionInfo | PASS：FileVersion `0.1.2`、ProductVersion `0.1.2.0` |
+| 包内容与仓库一致 | `_selftest/verify-package.js` 解 asar 逐文件 sha256 比对 | PASS：`src/{main,runtime-patch,dsh,config,balance}.js` 全部逐字节一致 |
+| 本轮改动确实进包 | 同上 | PASS：含 `ensurePluginListDescription`，且 `main.js` 里有调用；隐藏控制台补丁仍在 |
+| 包内容清单抽查 | `asar.listPackage` | PASS：含 `src/`、`assets/`；不含 `node_modules/`（当时共 17 项；第四轮起含随包插件，27 项） |
+| 补丁与插件列表联动 | 隔离 home 起 web，`pluginInventory/list` 按 UTF-8 复核 | PASS：`description` 为正确中文，156 行里仅本插件带该字段（见「第三轮」） |
+
+**注意（已被第四轮推翻）**：上面这几行写的是 0.1.2 第一次交付时的状态 —— 那时候包里**不含**
+`plugins/`，角色插件得在目标机器上另跑一次 `scripts/install-agent-role.ps1`。**现在的 0.1.2 包已经把
+`plugins/**` 打进 asar**（排除插件自己的 node_modules），启动时由 `src/plugin-install.js` 幂等装进
+`DSH_HOME`，新机器装完即带「角色」，不需要再手动装。详见第五节第四轮与 `HANDOFF.md`。
+
 
 ## 它做了什么
 
@@ -266,3 +325,308 @@ npm run dist         # 打 NSIS 安装包
 > 导致构建报 `EPERM: unlink ...`。`build\electron-dist\` 是打包必需，别删。
 
 更多细节见 `README.md`。
+
+## 本轮新增：会话角色插件（agent-role）
+
+**需求**：能给当前对话配置「角色」（项目经理 / 资深前端 / 资深算法工程师这类），并且**对话中随时切换**，
+做成插件、在所有模式下都能选。经确认收窄为：只内置一个角色「我的常用角色」（内容 = `~/.dsh/AGENTS.md`
+的常驻工作准则），并交付完整插件（GUI 选择器 + `/role` 命令）。
+
+### 为什么不能用 preset 实现
+
+DSH 的「模式」就是 agent preset（`standard` / `ptc` / `cordis` / `minimal`），它决定**工具集 + 提示词**，
+且**只能在会话创建时选定**——中途换会让已记录的 tool call 找不到对应工具，所以官方明确不支持会话中途
+切换（`dsh-agent-presets` 的已知限制里写得很清楚）。所以"按角色复制几个 preset"只能对新会话生效，
+不满足"对话时可以切换"。
+
+而「角色」只需要改系统提示词里的人设文本，不动工具集，因此可以中途切换。方案就按这个思路做：**宿主平面
+插件 + 动态提示词段落**，挂在用户级 patch 层 `~/.dsh/cordis.patch.yml`，于是对每个 preset 下的会话同时
+生效。
+
+### 交付物
+
+| 文件 | 作用 |
+| --- | --- |
+| `plugins/dsh-plugin-agent-role/lib/index.js` | 宿主半边：`role` 会话投影、`/role` 命令、`deployment:role` 动态段落 |
+| `plugins/dsh-plugin-agent-role/lib/roles.js` | 内置角色（我的常用角色）与角色表校验 |
+| `plugins/dsh-plugin-agent-role/lib/client.js` | 浏览器半边：给 `/role` 挂 popup 选择器（与 `/permission` 同构） |
+| `plugins/dsh-plugin-agent-role/README.md` | 用法、配置、安装、关键约束 |
+| `scripts/install-agent-role.ps1` | 幂等安装脚本（纯 ASCII，避免 Windows PowerShell 按 ANSI 读脚本） |
+
+已实际装入本机：`~/.dsh/profiles/{web,headless,sdk}/package.json` 声明依赖 + `node_modules/agent-role`
+junction，并在 `~/.dsh/cordis.patch.yml` 插入插件行。
+
+### 验证（都是真跑出来的）
+
+| 项目 | 方式 | 结果 |
+| --- | --- | --- |
+| 插件行进入组合 | `dsh --profile web --dump-config` | PASS，插件行在 home patch 层且 config 正确 |
+| 角色进入系统提示词 | `dsh --profile headless "…"` 一次真实模型调用，再逐帧解压会话日志查 `system/message` | PASS：`## 当前会话角色：我的常用角色` 紧跟人设之后、先于工具引导 |
+| **对话中切换** | 探针在 `session/created` 后追加 `role/selected`（切到另一个角色），再查真实请求 | PASS：投影 `{"role":"my-default"}` → `{"role":"switched-role"}`；请求里出现新角色标记词、旧角色标记词 **0 次** |
+| 客户端半边进 boot graph | 取**线上 GUI**（50210）的页面 HTML | PASS：`agent-role/client.js` 已在组合包列表中 |
+| 客户端 bundle 下发 | GET 组合包 URL | PASS：HTTP 200，内容含 `popupSelect` 装饰器代码 |
+| 热加载 | 本次会话自身的系统提示词 | PASS：无需重启桌面端，角色段落已生效（web profile 是 `patchReload: live`） |
+| 安装脚本幂等 | 重复执行 | PASS：第二次全部走「已就位，跳过」 |
+| 失败是否 fail loud | 故意把 profile manifest 写坏后启动 | PASS：直接报「2 entries did not activate」并列出待定服务，不静默降级 |
+
+### 踩到的三个真坑
+
+1. **loader 行的 `name` 必须等于插件 `package.json` 的 `name`**。`dsh-client-modules` 定位插件包时，
+   用行里的 specifier 解析出模块、再向上找 manifest，并**要求 manifest 的 name 等于该 specifier**；
+   不一致就把这行当成"没有浏览器半边"**静默跳过**——宿主正常工作、页面里永远没有选择器、且没有任何
+   报错。这条是靠一个临时探针插件逐段复刻解析链路才定位到的（症状是 boot graph 里没有我的包）。
+   已在插件 README 里写死这条约束。
+2. **会话日志是多个独立 zstd 帧首尾相接**（本机实测一次会话 6~7 帧）。`zlib.zstdDecompressSync` 只吃
+   第一帧，直接解会得到"只有 215 字符、看不到任何消息"的假象，排查时按帧切分才看得到真实内容。
+3. **插件自己的会话事件必须带 `ignorable: true`**。`role/selected` 不在 DSH 的
+   `KNOWN_SESSION_EVENT_TYPES` 里，缺这个标记时下次 resume 会因为"日志里有本构建不认识的必读事件"
+   而被拒绝读取。
+
+### 没能验证 / 遗留
+
+- **在浏览器里真点一次下拉选择器**没有条件做（本会话没有可交互的图形桌面）。已验证到"bundle 已下发到
+  浏览器、宿主 `/role` 命令存在、投影与段落联动"，请你在 GUI 里输入 `/role` 点一次确认。
+- **resume / fork 恢复角色**没有实测：事件已带 `ignorable` 标记、投影是标准 fold，按契约应当恢复，
+  但没跑过"关掉再打开同一会话"。
+- **`role` 这个投影键**若将来与 DSH 内置键撞名，注册表会直接抛错（loud），改个键名即可。
+
+### 第二轮：设置页增删角色（已完成）
+
+按你的确认补上了缺失的那一半：**设置 → 角色** 一整页（`settings.section` 插槽，不是 General 里的一行），
+每个角色一张卡片（名称 / 人设文本 / 删除）+「新增角色」+ 默认角色选择 + 保存/撤销。改动写进
+`~/.dsh/settings.yaml` 的 `agent-role:` 段，热生效。
+
+宿主侧新增 `agent-role` 设置命名空间（schemastery `Schema.dict(Schema.object(...))`，让设置文档保持
+人能直接读写的形状）；角色表变成「loader 配置 = composition base，settings.yaml = 用户层」的分层。
+
+第二轮验证（同样是真跑出来的）：
+
+| 项目 | 方式 | 结果 |
+| --- | --- | --- |
+| 无设置文档 | headless 真实会话 | PASS：用 composition base 的内置角色 |
+| **设置文档覆盖角色表** | 手写 `settings.yaml` 指定另一个角色 | PASS：请求里是新角色标记词，内置角色 **0 次** |
+| **浏览器同款 RPC 写入** | 复刻客户端握手（token→Cookie）后 POST `/api/settings/mutate`，ops 与设置页保存完全一致 | PASS：`describe` 能列出 `agent-role`；写入后 `settings.yaml` 正是那张表（不含 base 的键） |
+| RPC 写入的闭环 | 用 RPC 写出的 `settings.yaml` 再跑一次真实会话 | PASS：请求用的是 RPC 写入的角色 |
+| 坏文档不炸 | `settings.yaml` 写 `roles: {}` + `defaultRole: nope` | PASS：启动正常、不注入角色段落（不是让请求失败） |
+| 安装脚本幂等 | 重复执行（含新增的插件依赖链接步骤） | PASS：全部「已就位，跳过」 |
+
+第二轮踩到的坑（都写进插件 README 了）：
+
+4. **设置分层是递归合并普通对象**，用户层删不掉 base 里的键 —— 直接吃「解析后的值」会让设置页里
+   删掉的内置角色保存后原地复活。改成：用户层一旦声明了 `roles` 就以它为准，删掉整段即回退 base；
+   客户端同理读原始用户层。
+5. **`installSection` 的 `validate` 在注册期就会跑**，手改坏一个字段会让整个注册抛错、被 cordis
+   静默吞掉（症状是设置页空着、角色却仍是 base）。改成不挂 `validate`，坏值交给统一的收敛函数过滤
+   + 兜底，写入校验放在设置页保存前。
+6. **投影 `init` 不能钉住创建时的默认角色**：否则改默认角色对已有会话永远不生效。改成投影里空串表示
+   "从没显式切换过"（`stateVersion` 升到 2），此时跟随当前配置的默认值。
+7. **junction 安装的插件解析不到自己的依赖**：Node 会解引用到工作区真实路径，
+   `require('@deepseek-ai/schemastery')` 直接 `Cannot find module`。安装脚本会按插件
+   `package.json` 的 `dependencies` 自动补 `plugins/<插件>/node_modules/<dep>` 的 junction。
+
+### 没能验证 / 遗留
+
+- **在浏览器里真点一次**：下拉选择器和设置页的渲染/保存按钮都没有条件点（本会话没有可交互的图形
+  桌面）。已验证到"bundle 已下发到浏览器、宿主命令与设置命名空间都在、RPC 写入闭环成立"，请你在 GUI 里
+  输入 `/role` 点一次、以及打开「设置 → 角色」改一次确认。
+- **resume / fork 恢复角色**没有实测：事件已带 `ignorable` 标记、投影是标准 fold，按契约应当恢复，
+  但没跑过"关掉再打开同一会话"。
+- **`role` 这个投影键**若将来与 DSH 内置键撞名，注册表会直接抛错（loud），改个键名即可。
+
+（内置角色「我的常用角色」的文案是我按 `~/.dsh/AGENTS.md` 整理的，在设置页里直接改即可。）
+
+### 复验用的脚手架
+
+`_selftest/agent-role/`（已被 gitignore）留了这些脚本，以后改动可以重跑：
+
+- `stage.ps1`：搭一个隔离的 DSH_HOME（web + headless 两个 profile、junction、patch 行，可选复制凭据）；
+- `check-log.js`：逐帧解压会话日志并检查标记词（`zstdDecompressSync` 只吃第一帧，所以必须自己切帧）；
+- `rpc-test.ps1`：复刻浏览器握手后打 `settings/describe` 与 `settings/mutate`，验证设置写入；
+- `client-harness.js`：**用迷你 React 在 Node 里跑真实的 `lib/client.js`**（29 项断言：注册、渲染、
+  增删改、保存 ops、用户层优先、只读、选择器）—— 把原本只能靠浏览器点的那半边变成可断言的东西；
+- `patch-check.js`：把运行时补丁打在工作区副本上，断言变换结果、语法与幂等；
+- `apply-patch.js`：把插件列表说明补丁立即打到运行时（桌面端每次启动也会自己打）；
+- `verify-inventory.js`：Node 侧按 UTF-8 复核 inventory 响应里的 `description`（PS 5.1 会解错码）；
+- `verify-package.js`：解 0.1.2 的 app.asar，与仓库源码逐字节比对并检查版本号与本轮改动；
+- `asar-probe.js`：对比 `ELECTRON_NO_ASAR` 开关下 `lstat`/`readdir` 对 `.asar` 的行为（打包那个 ENOTDIR 的证据）。
+
+### 第三轮：用户反馈的两个问题
+
+**1. 「设置 → 插件」那一行没有中文说明。**
+
+查清后确认：这个列表由 shipped 包渲染，每行只显示 `moduleShortName(模块名)` 与
+`entrySubtitle(行 id)`，数据里**根本没有说明字段**。按你的选择做成「加字段 + 备注行显示它」：
+桌面端打运行时补丁（`src/runtime-patch.js` 的 `ensurePluginListDescription`），宿主
+`dsh-host-plugin-inventory` 在每条 entry 上透出插件行 `config.description`，浏览器
+`dsh-client-ui-settings-plugin-inventory` 让备注行优先显示它（没有该字段就退回行 id，其它插件不变）。
+本插件的行因此写上 `description: 会话角色：…`。loader 行 id 保持 `agent-role` 未改。
+
+**2. 重启客户端后设置里没有「角色」。**
+
+根因是客户端服务注入方式：我把设置页注册嵌在 `ctx.inject([...])` 里，而 shipped 的设置类插件
+（`ui-permission-presets`、`ui-agent-preset`）一律用**插件级 `inject`**。两种 inject 在 cordis 里
+解析到的实例不同 —— 这一点我在宿主侧的探针上也撞到过（插件级 `inject: ['settings']` 拿到空注册表，
+`ctx.inject(['settings'])` 拿到真实的那个）。改成插件级 inject、并在 `apply` 里直接
+`ctx.slots.inject("settings.section", …)` 注册；读取改用与 permission 同款的共享镜像
+`ctx.settingsScope.describe()`（不再用我原先的 `bind()`），写入用 `ctx.remote.settings.mutate` +
+`face.acceptView`。
+
+**顺带修掉一个会让设置页直接崩的真 bug**：草稿同步的 `useEffect` 原先放在几个早返回之后，
+是 React hooks 顺序违规（首次渲染不调用它，第二次调用就抛错）。已移到早返回之前。
+`client-harness.js` 就是为这类问题准备的。
+
+第三轮验证（都是真跑出来的）：
+
+| 项目 | 方式 | 结果 |
+| --- | --- | --- |
+| 客户端注册与渲染 | `client-harness.js` 跑真实 bundle | PASS：29 项全过（含保存 ops 形状、revision、用户层优先、只读、选择器 active） |
+| 运行时补丁变换 | `patch-check.js` 打在工作区副本上 | PASS：14 项全过（变换生效、只插一次、产物过 `--check`、幂等、陌生文件不动） |
+| 补丁落到真实运行时 | `apply-patch.js` + 标记计数 | PASS：两个文件各 1 处标记，再跑一次全 `already` |
+| 宿主响应带说明 | 隔离 home 起 web，`pluginInventory/list` 用 Node 按 UTF-8 复核 | PASS：`description === "这是测试用的中文功能说明"`，156 行里仅本插件带该字段 |
+| 客户端补丁已下发 | 取 `/plugins` 组合包内容 | PASS：含 `typeof description === "string"` 与 `description: entry.description,` |
+
+### 第四轮：插件随包安装 + 「在文件资源管理器中显示」修复（本交付）
+
+**1. 角色插件随包安装。** `electron-builder.yml` 的 `files` 加 `plugins/**/*`（排除
+`plugins/**/node_modules`）；新增 `src/plugin-install.js`，启动时把随包的
+`plugins/dsh-plugin-agent-role` **复制**到 `<DSH_HOME>/profiles/<profile>/node_modules/agent-role/`，
+并确保 `<DSH_HOME>/cordis.patch.yml` 里有那一行。复制成真实目录而不是 junction，是为了让插件自己的
+`require('@deepseek-ai/schemastery')` 能顺着父目录链走到 `profiles/node_modules` 那个依赖闭包。
+逐字节比对，内容一致就不写盘（幂等）；已有三个 profile 里指向仓库的 junction 因此是 no-op。
+插件侧顺手做了降级：`@deepseek-ai/schemastery` 改成可选 require，缺失时只跳过「设置 → 角色」页并
+warn，不再连带 dsh 启动失败。
+
+**2. 「在文件资源管理器中显示」点了没反应。** 链路是交付物卡片 →
+`POST /api/present.open?...&action=reveal` → `dsh-native-command` 的 `execFile('explorer.exe',
+['/select,', url])`。根因：`runNativeCommand` 给每个子进程都加 `windowsHide: true`，而 explorer 的
+窗口**就是子进程自己的窗口**，于是被一起压掉 —— 宿主返回成功、前端提示已请求，用户什么都看不见。
+补丁 `src/runtime-patch.js` 的 `ensureNativeOpenVisible()` 只对 `explorer.exe` 不隐藏；
+`powershell Invoke-Item`、`wslpath` 等"启动器"仍保持隐藏（被启动的是另一个进程，藏掉控制台正是本意）。
+
+**3. 覆盖安装到哪个目录（顺带查清）。** `oneClick: false` + `allowToChangeInstallationDirectory:
+true` 走的是 assisted installer，`multiUser.nsh` 会先读
+`HKCU\Software\<APP_GUID>\InstallLocation`，读到就把 `$INSTDIR` 预设成它 —— 所以第一次选了自定义
+目录的话，新包是**覆盖升级到原目录**，不是装回默认目录，选择页也会预填并提示重新安装/升级。
+
+第四轮验证（都是真跑出来的）：
+
+| 项目 | 方式 | 结果 |
+| --- | --- | --- |
+| 插件安装逻辑 | `_selftest/agent-role/plugin-install-check.js` | PASS：18 项（两种 patch 文件形态、幂等、陌生形态返回 skipped 不动用户文件） |
+| 全新机器集成 | `_selftest/agent-role/fresh-install-check.ps1` | PASS：全新 `DSH_HOME` → 装插件 → dsh 首启无报错 → 会话日志里出现内置角色名 |
+| 三个运行时补丁 | `_selftest/agent-role/patch-check.js` | PASS：变换、产物语法、幂等、陌生文件不动 |
+| 窗口确实弹出 | `_selftest/reveal-probe.js` + 窗口标题计数 | PASS：真实模块调 `revealNativePath`，窗口 1 → 2 个，标题 `release` |
+| 打包装箱 | `npm run dist` + `_selftest/verify-package.js` | PASS：26 项全绿（包内源码/插件与仓库逐字节一致、版本 0.1.2、三个补丁都在、清单 27 项） |
+
+**没能验证**：插件的设置页（设置 → 角色）在真实浏览器里仍没人点过 —— 本机没有可交互图形桌面，
+只能用 `client-harness.js` 覆盖逻辑。
+
+### 第五轮：角色设置页分两级 + 会话内实时角色标签
+
+用户（在真实界面里）提的三点，只改插件浏览器半边 `plugins/dsh-plugin-agent-role/lib/client.js`：
+**不动版本号，仍是 0.1.2**；改完按用户要求重打了一次包（`npm run dist` 先自动删掉同名旧包，
+新包 101,445,061 字节，`verify-package.js` 26 项全绿）。
+
+**1. 设置页分成两级。** 原来一页铺开：默认角色下拉 + 每个角色一张卡片（id、名称、人设、删除）。
+现在一级只有角色名称列表（点行进入），二级才是单个角色的 id（只读）、名称、人设文本、删除与返回。
+「新增角色」在一级，点完直接进新角色的二级页（新人设本来就是空的，省一次点击）。
+「保存 / 撤销改动」两级都在，作用于整张表。层级用组件内的 `openId` 表示，不额外开 effect 同步：
+草稿是本地状态，"打开的角色还在不在表里"直接算，删掉后自动退回列表。
+
+**2. 默认角色下拉只剩名称。** 候选项从 `名称（id）` 改成 `名称`（id 挪到二级页显示）。
+
+**3. 会话内实时角色标签。** 注册 `conversation.input.left`（session 级 list 插槽，输入框工具行左侧，
+Plan 芯片那一排）显示 `角色：<当前角色名>`。数据来自槽位的标准 props `useProjection("role")` ——
+就是宿主按会话日志折出来的 `role` 投影 wire 视图（没显式切换过的会话是默认角色），切换后随投影推送
+自动更新，前端不自己维护状态；投影不可用时整个标签不渲染（不留空壳）。这是 dsh 自己的
+`ui-plan` 芯片的同一套写法（`dsh-cordis-client-runner` 里的插槽目录明确列出该插槽的
+standardProps 含 `useProjection`）。
+
+第五轮验证：
+
+| 项目 | 方式 | 结果 |
+| --- | --- | --- |
+| 客户端半边逻辑 | `_selftest/agent-role/client-harness.js`（迷你 React 跑真实 bundle） | PASS：**43 项**（比上一轮 +14），含两级导航、默认下拉只剩名称、新增直达二级、删除退回一级、指示器随投影变化 |
+| 产物语法 | Electron 自带的 Node 24 `--check` | PASS：`client.js` 可解析（PATH 上的 Node 12 不认可选链，这是它报错的唯一原因） |
+| 打包装箱 | `npm run dist` + `_selftest/verify-package.js` | PASS：26 项全绿，包内插件（含 README）与仓库逐字节一致 |
+
+harness 当场抓到一个真 bug：二级页元素被提前构造，`openId` 为 null 时也会去取 `draft.roles[null]`，
+`useState` 首次渲染即抛错。已改成按 id 惰性构造（`detailPageOf(id)`）。
+
+**仍未验证**：真实浏览器里长什么样（本机没有可交互图形桌面）。要看到这些改动：重启桌面端 /
+dsh 进程（插件是以 junction 指向仓库装的，改代码即改装好的包）。
+
+### 回滚
+
+删掉 `~/.dsh/cordis.patch.yml` 里的 `agent-role` 那段，再删掉
+`~/.dsh/profiles/{web,headless,sdk}/node_modules/agent-role` 三个 junction（用 `cmd /c rmdir`，
+别用 `Remove-Item -Recurse`——那会顺着链接删到插件源码目录）即可。插件的用户设置留在
+`~/.dsh/settings.yaml` 的 `agent-role:` 段里，按需一并删除。
+
+插件列表说明补丁想撤掉的话，把 `src/main.js` 里那行 `runtimePatch.ensurePluginListDescription(...)`
+注释掉并重装 dsh 运行时即可（补丁跟着 node_modules 一起没了）。
+
+## 实现备忘
+
+> 原来写在 README 里，README 精简后挪到这里。都是实现层面的约束和踩过的坑，改代码前值得先看。
+
+### 启动各阶段耗时（参考）
+
+| 阶段 | 说明 | 耗时 |
+| --- | --- | --- |
+| 准备运行环境 | 读本地已装版本（不联网） | 立即（进度 0→30%） |
+| 安装 / 更新 dsh | 只在本地没有可用运行时（首次），或你点了「立即更新」时才会联网 | 首次约 30s（进度 10→78%） |
+| 启动服务 | 拉起本地 `dsh web`，端口由系统分配 | 取决于 dsh 自身 |
+| 打开界面 | 载入 Web UI | 立即（100%） |
+
+安装阶段没有精确的进度事件，进度条是按耗时估算的爬升；服务启动阶段同理。引导页右侧有「显示日志」。
+
+### 命令行窗口不会闪
+
+新机器上第一次启动、以及每次升级 dsh 之后，客户端都会给运行时补一个「隐藏子进程控制台窗口」的
+补丁（`src/runtime-patch.js`，幂等）：dsh 本身跑在没有控制台的 GUI 进程里，不补的话 agent 每跑一条
+命令，Windows 都会给它新建并弹出一个黑框。
+
+补丁只在**进程创建的显示状态**上动手（`STARTF_USESHOWWINDOW | SW_HIDE`），不改变子进程有没有控制台
+—— 后者（`CREATE_NO_WINDOW` / Node 的 `windowsHide`）在受限令牌的沙箱下会让子进程直接起不来
+（`STATUS_DLL_INIT_FAILED`）。dsh 上游把这两处改好之后补丁会自动跳过（检测到标记就什么都不做），
+届时删掉 `src/runtime-patch.js` 与 `main.js` 里那行调用即可。
+
+### 实现上必须注意的四点
+
+1. **`dsh web` 必须加 `--expose-internals`**。dsh 的 HMR 加载器优先用它直接取 Node 内部 ESM
+   loader；否则回退到 `node-addon-require-builtin`，而那个原生插件在 Electron 内嵌的 Node 里用不了
+   （`no compatible GetAlignedPointerFromEmbedderData symbol found`），启动会直接失败。
+2. **子进程的 `cwd` 是 `DSH_HOME`，目录必须先建出来**。全新电脑上它并不存在，而 Windows 下不存在的
+   cwd 会让 `spawn` 直接抛 `ENOENT`。
+3. **子进程 stdio 采用「管道优先、失败回退文件」**。stdout 重定向到文件时，就绪那一行
+   （`dsh web: <url>`）不一定及时落盘；但某些受限环境又不允许给子进程建管道，所以两条路都要有。
+   注意：**文件回退路径下子进程的行已经写进日志文件了，父进程不能再往同一个文件写回去**，否则就是
+   "读出来 → 写回去 → 又被读出来"的自增殖循环（日志每轮翻倍）。
+4. **打包后 `process.execPath` 是 `DSH 桌面端.exe`**，不是 `electron.exe`。这段路径解析必须同时兼容
+   开发态与打包态，否则只有成品会踩坑。
+
+### 托盘与退出
+
+- 窗口的 `close` 事件里判断 `closeAction`：为 `tray` 时 `preventDefault()` 并 `hide()`，否则放行给
+  默认关闭流程。
+- 真正退出统一走 `quitApp()`（置 `quitting = true` 再 `app.quit()`），否则会被 `close` 处理器拦住变成
+  「隐藏」；重复点击由 `quitting` 挡掉，`before-quit` 里的收尾由 `shutdownInFlight` 保证只跑一次。
+- `before-quit` 先 `preventDefault()`，收起窗口与托盘图标（让"点了退出"立刻有反馈），再停子进程，
+  停完重放 `app.quit()`。
+- `stop()` **按进程存活判断是否结束，不等 `close` 事件**：`close` 还要求 stdio 全部关闭，可能被 dsh
+  派生的、持有同一批管道的工作进程拖住。Windows 上直接 `taskkill /T /F` 杀整棵树（宽限期为 0：
+  不带 `/F` 的 taskkill 对无窗口的控制台进程必然失败），被安全软件/权限拒绝时退回 `child.kill()`。
+- 托盘图标用独立的 `build/icon-32.png`（`npm run icon` 会一并生成），直接拿 ICO 给 `Tray` 在部分环境
+  下会显示异常。
+- 「最小化到托盘」的提示只走系统通知一个通道：老的 `tray.displayBalloon` 会跟它一起弹两个，而且展开
+  任务栏折叠区时 Windows 还会把气泡重播一次。
+
+### 关于 Web 鉴权
+
+`dsh web` 启动时会打印带一次性 token 的地址。浏览器访问该地址会拿到一个 HttpOnly Cookie 并 303 跳到
+干净的 `/`；之后的请求都靠 Cookie。所以：
+
+- 应用里直接 `loadURL(带 token 的地址)` 即可，窗口会自然完成握手；
+- 用脚本校验可用性时，**不能**只发一次不带 Cookie 的请求（那必然是 401），要复刻「拿 token 换
+  Cookie → 带 Cookie 请求」两步。
