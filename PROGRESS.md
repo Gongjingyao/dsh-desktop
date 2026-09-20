@@ -1,8 +1,9 @@
 # DSH Desktop 交付说明
 
-**交付物**：`release\DSH-Desktop-Setup-0.1.2-x64.exe`（101,445,061 字节 ≈ 96.7 MB，NSIS 安装包）
+**交付物**：`release\DSH-Desktop-Setup-0.1.2-x64.exe`（101,446,764 字节 ≈ 96.7 MB，NSIS 安装包）
 **状态**：已完成并验证通过。本包 = 0.1.1 的全部内容 + 「插件列表功能说明」运行时补丁
-+ 本机可用的打包入口 + 本节第四轮的两项：**角色插件随包安装**、「在文件资源管理器中显示」窗口修复。
++ 本机可用的打包入口 + 第四轮的**角色插件随包安装**与「在文件资源管理器中显示」窗口修复
++ 第五轮的**两级角色设置页与会话内角色标签** + 第六轮的**内置三角色分工**（我的常用角色 / 前端开发者 / 需求搭档）。
 与 0.1.1 是同一 appId 的同一个产品，新包可直接覆盖安装。
 
 > **版本号**：第四轮的改动原先按 0.1.3 打过一次（被打断），按你的要求改回 **0.1.2** 重打；
@@ -555,6 +556,44 @@ harness 当场抓到一个真 bug：二级页元素被提前构造，`openId` �
 
 **仍未验证**：真实浏览器里长什么样（本机没有可交互图形桌面）。要看到这些改动：重启桌面端 /
 dsh 进程（插件是以 junction 指向仓库装的，改代码即改装好的包）。
+
+### 第六轮：角色分工重排（AGENTS.md 迁进角色）+ 内置角色表同步
+
+**为什么要做**：`~/.dsh/AGENTS.md`（每次会话注入一次）和角色「我的常用角色」的人设（**每轮**都注入）
+原本是同一套准则的两份，重复付费，而且已经各自漂移（人设是较早的摘抄，缺 AGENTS.md 的「五、使用注意」）。
+按"要不要写代码"把准则归到角色上，上下文里就只剩当前角色的那一份。
+
+**落点（都在 `~/.dsh`，不进仓库）**：
+
+| 位置 | 变化 |
+| --- | --- |
+| `~/.dsh/AGENTS.md` | 1680 字 → **44 字指针**（准则改由角色承载；真留空文件也行，但留一行便于日后查到去向） |
+| 角色 `my-default`「我的常用角色」 | 1135 字 → **158 字**，只留 5 条通用约束（去掉开发者身份与技术栈） |
+| 角色 `frontend-dev`「前端开发者」 | **新增 1477 字** = 原 AGENTS.md 一~四节全文（去掉讲文件机制的「五、使用注意」） |
+| 角色 `product-partner`「需求搭档」 | 原 `role-1`（需求分析师）1800 字 → **850 字常驻**；id 改为 `product-partner` |
+| `~/.dsh/skills/requirement-analysis/SKILL.md` | **新增 2113 字**：七要素表、边界与异常 10 项清单、各端用户习惯表、方案调优六问、输出模板、纪律 |
+
+装配脚本 `_selftest/apply-roles.js`（读 `_selftest/roles/*.md` 源文件，支持 `--dry`）：写盘前用 dsh 自己的
+`yaml` 库做解析→序列化→再解析的往返校验，断言三个角色的 name/prompt 逐字不变、其它设置段原样，
+写盘后回读复查；改动前把 `settings.yaml` / `AGENTS.md` 备份成 `.before-roles-migration`。
+
+**仓库侧同步**：`plugins/dsh-plugin-agent-role/lib/roles.js` 的 `BUILTIN_ROLES` 从"单个长开发者人设"改成
+`my-default` / `frontend-dev` / `product-partner` 三个，文本与 `_selftest/roles/*.md` 逐字一致 ——
+新机器（没有 settings 用户层）拿到的是同一套分工。skill 按用户要求不进仓库。
+
+第六轮验证（都是真跑出来的）：
+
+| 项目 | 方式 | 结果 |
+| --- | --- | --- |
+| 装配 + YAML 往返 | `_selftest/apply-roles.js --dry` 与实跑 | PASS：3 角色、`defaultRole: my-default`，`ui-onboarding`/`agent-default-model`/`ui-theme` 原样 |
+| 内置表与源文件一致 | `_selftest/agent-role/builtin-roles-check.js` | PASS：**18 项**（三份文本逐字比对 + `resolveConfig` 覆盖/非法配置报错） |
+| 插件回归 | `client-harness` / `patch-check` / `plugin-install-check` | PASS：43 / 21 / 19 |
+| 新机集成 | `fresh-install-check.ps1`（全新 DSH_HOME → 装插件 → dsh 首启 → 会话日志里有内置角色名） | PASS：装进 web + headless，首启无报错，日志里出现「我的常用角色」 |
+| skill 被识别 | 会话的 skill 目录 | PASS：`requirement-analysis` 实时出现（dsh 文件监听，无需重启） |
+| 角色热生效 | 当轮系统提示词 | PASS：人设已切换为精简版，全程未重启 |
+
+**成本变化（每轮常驻）**：默认角色 1135 → 158 字（约省 0.6~0.8k token/轮）；
+AGENTS.md 每次会话注入 1680 字 → 44 字；「需求搭档」1800 → 850 字常驻 + 2113 字按需加载。
 
 ### 回滚
 

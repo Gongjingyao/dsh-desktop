@@ -6,16 +6,21 @@
 ## 一、当前状态（一句话）
 
 **这一轮已经收尾：安装器 exe 已组装并核验通过。** 产物
-`release\DSH-Desktop-Setup-0.1.2-x64.exe`（101,445,450 字节），`_selftest/verify-package.js`
+`release\DSH-Desktop-Setup-0.1.2-x64.exe`，`_selftest/verify-package.js`
 26 项断言全绿（包内源码与插件与仓库逐字节一致、版本 0.1.2、三个补丁都在、清单 27 项）。
 
 版本号说明：本轮的改动原先按 `0.1.3` 打过一次（被打断，`release` 里留下了 0.1.3 的载荷），
 按用户要求**改回 `0.1.2` 重打**；同名旧包已在打包时被自动清理，release 下现在没有 0.1.3 的任何残留。
 
-**打包之后又改了一轮插件界面**（第五轮：角色设置页分两级、默认角色下拉只剩名称、会话输入行加实时
-角色标签，见 `PROGRESS.md`）。只改了 `plugins/dsh-plugin-agent-role/lib/client.js` + client harness，
-**按用户要求没动版本号（仍是 0.1.2）**，但已连同这次改动**重打了一次包**：`release` 里现在的
-`DSH-Desktop-Setup-0.1.2-x64.exe`（101,445,061 字节）就是含新界面的版本，`verify-package.js` 26 项全绿。
+**之后又在同一个 0.1.2 上改了两轮、各重打了一次包**（都没动版本号；`npm run dist` 每次先删旧包）：
+
+- **第五轮 · 插件界面**：角色设置页分两级（一级只列名称、二级编辑名称与人设）、默认角色下拉只剩名称、
+  会话输入行加实时角色标签。改的是 `plugins/dsh-plugin-agent-role/lib/client.js` + client harness。
+- **第六轮 · 角色分工重排**：`~/.dsh/AGENTS.md` 清空（开发者准则迁进新角色「前端开发者」）、
+  「我的常用角色」只留通用约束、「需求搭档」拆成短人设 + `requirement-analysis` skill；
+  仓库侧把 `plugins/dsh-plugin-agent-role/lib/roles.js` 的 `BUILTIN_ROLES` 同步成这三个角色。
+
+当前 exe 的确切大小以 `PROGRESS.md` 顶部或 `Get-Item release\*.exe` 为准（每次重打都会变）。
 
 ## 二、下次怎么重打（已跑通，命令可直接抄）
 
