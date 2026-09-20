@@ -1,9 +1,10 @@
 # DSH Desktop 交付说明
 
-**交付物**：`release\DSH-Desktop-Setup-0.1.2-x64.exe`（101,446,764 字节 ≈ 96.7 MB，NSIS 安装包）
+**交付物**：`release\DSH-Desktop-Setup-0.1.2-x64.exe`（101,446,912 字节 ≈ 96.7 MB，NSIS 安装包）
 **状态**：已完成并验证通过。本包 = 0.1.1 的全部内容 + 「插件列表功能说明」运行时补丁
 + 本机可用的打包入口 + 第四轮的**角色插件随包安装**与「在文件资源管理器中显示」窗口修复
-+ 第五轮的**两级角色设置页与会话内角色标签** + 第六轮的**内置三角色分工**（我的常用角色 / 前端开发者 / 需求搭档）。
++ 第五轮的**两级角色设置页与会话内角色标签** + 第六轮的**内置三角色分工**（我的常用角色 / 前端开发者 / 需求搭档）
++ 第七轮的**人设单一来源**（`roles/*.md` 生成 `lib/roles.js` 的生成区）。
 与 0.1.1 是同一 appId 的同一个产品，新包可直接覆盖安装。
 
 > **版本号**：第四轮的改动原先按 0.1.3 打过一次（被打断），按你的要求改回 **0.1.2** 重打；
@@ -594,6 +595,35 @@ dsh 进程（插件是以 junction 指向仓库装的，改代码即改装好的
 
 **成本变化（每轮常驻）**：默认角色 1135 → 158 字（约省 0.6~0.8k token/轮）；
 AGENTS.md 每次会话注入 1680 字 → 44 字；「需求搭档」1800 → 850 字常驻 + 2113 字按需加载。
+
+### 第七轮：人设文本单一来源化（`roles/*.md` + 生成器）
+
+第六轮之后同一份人设有两个消费方：仓库内置表（`lib/roles.js`，服务新机器 / 没有用户层的 profile）与本机
+`~/.dsh/settings.yaml`（`_selftest/apply-roles.js` 装配）。但源文件原先放在 gitignore 的 `_selftest/` 下，
+于是"别人 clone 下来既看不到人设源、也跑不了那条一致性校验"。
+
+这一轮把来源搬进仓库并做成生成关系：
+
+- 新增 `plugins/dsh-plugin-agent-role/roles/{my-default,frontend-dev,product-partner}.md`：**唯一来源**
+- 新增 `scripts/sync-roles.js`：把三份文本生成进 `lib/roles.js` 的「生成区」（BEGIN/END 标记之间，
+  生成区之外的手写代码不动）；`--check` 不同步就退出码 1
+- `package.json` 新增 `npm run roles` / `npm run roles:check`
+- `_selftest/apply-roles.js` 改为读仓库里的源文件；`_selftest/roles/` 已删除
+- `_selftest/agent-role/builtin-roles-check.js` 改读新位置，并断言 `roles/` 里恰好是登记的那三份
+
+**为什么生成、而不是运行时读文件**：运行时读 `.md` 会让插件不再自包含（文件缺失、asar 与复制路径差异都要兜底），
+收益只是省一条命令；生成方案下运行时零新增失败面，安装器也不用改（`plugin-install.js` 本来就是整目录复制）。
+
+第七轮验证（都是真跑出来的）：
+
+| 项目 | 方式 | 结果 |
+| --- | --- | --- |
+| 生成结果与手写内容一致 | 先手工写好生成区，再跑 `node scripts/sync-roles.js` | PASS：报"已是最新"（逐字节一致），diff 只有新增的标记行与注释 |
+| 漂移能被发现 | 临时往 `roles/my-default.md` 追加 3 字再跑 `--check` | PASS：退出码 1 + "跑 npm run roles 重新生成"；随后按备份还原（422 字节） |
+| 单一来源生效 | `_selftest/apply-roles.js --dry`（现在读仓库源文件） | PASS：三角色 158/1477/850 字，装配结果与改前完全一致（2762 → 2762 字符） |
+| 校验脚本 | `builtin-roles-check.js` | PASS：**20 项**（含 `roles/` 目录清单） |
+| 插件回归 | `client-harness` / `patch-check` / `plugin-install-check` | PASS：43 / 21 / 19 |
+| 打包装箱 | `npm run dist` + `verify-package.js` | PASS：26 项全绿（包内多出 `roles/*.md`，安装器整目录复制，行为不变） |
 
 ### 回滚
 

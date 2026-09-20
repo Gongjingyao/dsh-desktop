@@ -19,6 +19,8 @@
 - **第六轮 · 角色分工重排**：`~/.dsh/AGENTS.md` 清空（开发者准则迁进新角色「前端开发者」）、
   「我的常用角色」只留通用约束、「需求搭档」拆成短人设 + `requirement-analysis` skill；
   仓库侧把 `plugins/dsh-plugin-agent-role/lib/roles.js` 的 `BUILTIN_ROLES` 同步成这三个角色。
+- **第七轮 · 人设单一来源**：人设文本搬到仓库 `plugins/dsh-plugin-agent-role/roles/*.md`，
+  `lib/roles.js` 的生成区由 `scripts/sync-roles.js` 生成（`npm run roles` / `npm run roles:check`）。
 
 当前 exe 的确切大小以 `PROGRESS.md` 顶部或 `Get-Item release\*.exe` 为准（每次重打都会变）。
 
